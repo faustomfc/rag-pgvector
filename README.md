@@ -1,39 +1,74 @@
-# RAG Pipeline — pgvector + Ollama + FastAPI + Kubernetes
+cat > /mnt/user-data/outputs/README.md << 'ENDOFFILE'
+# rag-pgvector
 
-A production-ready Retrieval-Augmented Generation (RAG) system built from scratch. Ingests PDF documents into a PostgreSQL vector database and exposes a REST API for conversational Q&A over those documents — fully containerized and orchestrated with Kubernetes.
+A production-ready Retrieval-Augmented Generation (RAG) system. Ingests PDF documents into a PostgreSQL vector database and exposes a REST API for conversational Q&A — fully containerized with Docker and orchestrated with Kubernetes.
 
 ---
 
-## Architecture
+## System Context
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    Kubernetes Cluster                │
-│                                                     │
-│  ┌──────────┐   ┌──────────┐   ┌─────────────────┐ │
-│  │ postgres │   │  ollama  │   │    rag-api       │ │
-│  │ pgvector │   │ llama3.2 │   │    FastAPI       │ │
-│  └──────────┘   └──────────┘   └─────────────────┘ │
-│                                        ↕            │
-│                              NodePort :30800        │
-└─────────────────────────────────────────────────────┘
+```mermaid
+C4Context
+    title System Context — RAG Pipeline
+
+    Person(user, "User", "Asks questions via REST API")
+
+    System(rag, "RAG API", "Retrieves context from documents and generates answers")
+
+    System_Ext(ollama, "Ollama", "Runs llama3.2 locally for LLM inference")
+    System_Ext(hf, "Hugging Face", "Provides embedding and reranker models")
+    SystemDb_Ext(pg, "PostgreSQL + pgvector", "Stores document chunks and vector embeddings")
+
+    Rel(user, rag, "POST /chat", "HTTP/JSON")
+    Rel(rag, pg, "Vector similarity search", "SQL")
+    Rel(rag, ollama, "Query rewriting + answer generation", "HTTP")
+    Rel(rag, hf, "Downloads models on startup", "HTTPS")
 ```
 
-### RAG Pipeline
+---
 
+## Container Diagram
+
+```mermaid
+C4Container
+    title Container Diagram — Kubernetes Cluster
+
+    Person(user, "User")
+
+    System_Boundary(k8s, "Kubernetes (Minikube)") {
+        Container(api, "rag-api", "FastAPI + Uvicorn", "Exposes /chat, /health, /documents. Runs embedding model and reranker.")
+        Container(ollama, "ollama", "Ollama", "Serves llama3.2 for query rewriting and answer generation.")
+        ContainerDb(pg, "postgres", "PostgreSQL 16 + pgvector", "Stores document chunks with HNSW vector index.")
+        Container(ingest, "ingest (Job)", "Python", "Extracts PDFs, generates embeddings and indexes chunks. Runs once.")
+    }
+
+    Rel(user, api, "POST /chat", "NodePort :30800")
+    Rel(api, pg, "Similarity search + CRUD", "SQL / psycopg3")
+    Rel(api, ollama, "Rewrite query + generate answer", "HTTP :11434")
+    Rel(ingest, pg, "Insert chunks + embeddings", "SQL / psycopg3")
 ```
-PDF Documents
-     ↓
-Text Extraction (PyMuPDF)
-     ↓
-Semantic Chunking
-     ↓
-Embeddings (BAAI/bge-m3)
-     ↓
-pgvector (PostgreSQL)
-     ↓
-Query → Rewrite → Search → Rerank → Generate
-              (llama3.2)  (bge-m3) (bge-reranker-v2-m3) (llama3.2)
+
+---
+
+## RAG Pipeline
+
+```mermaid
+flowchart TD
+    A[PDF Documents] --> B[Text Extraction\nPyMuPDF]
+    B --> C[Semantic Chunking\n800 chars · 120 overlap]
+    C --> D[Embeddings\nBAAI/bge-m3]
+    D --> E[(PostgreSQL\npgvector · HNSW index)]
+
+    F([User Question]) --> G{Has history?}
+    G -- Yes --> H[Query Rewriting\nllama3.2]
+    G -- No --> I[Original Query]
+    H --> J[Encode Query\nBAAI/bge-m3]
+    I --> J
+    J --> K[Cosine Similarity Search\ntop-30 chunks]
+    E --> K
+    K --> L[Cross-Encoder Reranking\nBAAI/bge-reranker-v2-m3\ntop-3 chunks]
+    L --> M[Answer Generation\nllama3.2 via Ollama]
+    M --> N([Answer])
 ```
 
 ---
@@ -43,9 +78,9 @@ Query → Rewrite → Search → Rerank → Generate
 | Layer | Technology |
 |---|---|
 | Embeddings | `BAAI/bge-m3` (local, multilingual) |
-| Reranker | `BAAI/bge-reranker-v2-m3` |
+| Reranker | `BAAI/bge-reranker-v2-m3` (Cross-Encoder) |
 | LLM | `llama3.2` via Ollama |
-| Vector DB | PostgreSQL + pgvector |
+| Vector DB | PostgreSQL 16 + pgvector (HNSW index) |
 | API | FastAPI + Uvicorn |
 | ORM | SQLAlchemy 2.0 + psycopg3 |
 | Packaging | uv |
@@ -104,9 +139,9 @@ Query → Rewrite → Search → Rerank → Generate
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 - [uv](https://docs.astral.sh/uv/)
 - [Ollama](https://ollama.com/download)
-- [Minikube](https://minikube.sigs.k8s.io/docs/start/) (for Kubernetes)
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- NVIDIA GPU (optional, recommended for performance)
+- [Minikube](https://minikube.sigs.k8s.io/docs/start/) *(for Kubernetes)*
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) *(for Kubernetes)*
+- NVIDIA GPU *(optional, recommended)*
 
 ### 1. Configure environment
 
@@ -115,7 +150,7 @@ cp .env.example .env
 # edit .env with your settings
 ```
 
-### 2. Run with Docker Compose (local)
+### 2. Run with Docker Compose
 
 ```bash
 # Start Postgres and Ollama
@@ -134,10 +169,10 @@ docker compose -f .docker/docker-compose.yml --env-file .env up rag-api
 ### 3. Run with Kubernetes (Minikube)
 
 ```bash
-# Start the cluster
+# Start cluster
 minikube start --driver=docker --memory=14000
 
-# Load local images into Minikube
+# Load local images
 minikube image load docker-ingest:latest
 minikube image load docker-rag-api:latest
 
@@ -149,41 +184,40 @@ kubectl wait --for=condition=ready pod -l app=postgres --timeout=60s
 kubectl apply -f k8s/ollama.yaml
 kubectl apply -f k8s/rag-api.yaml
 
-# Copy PDFs into Minikube and run ingestion via port-forward
+# Copy PDFs and run ingestion via port-forward
 minikube ssh "sudo mkdir -p /data/pdfs"
 minikube cp ./pdf_folder/<file>.pdf /data/pdfs/<file>.pdf
 
-kubectl port-forward svc/postgres 5433:5432  # Terminal 1
-uv run python ingest.py --pdf-folder-location ./pdf_folder \  # Terminal 2
+# Terminal 1
+kubectl port-forward svc/postgres 5433:5432
+
+# Terminal 2
+uv run python ingest.py \
+  --pdf-folder-location ./pdf_folder \
   --db-host localhost --db-port 5433 \
   --db-name rag_db --db-user postgres --db-password postgres
 
-# Expose the API
+# Expose API
 minikube service rag-api --url
 ```
 
 ---
 
-## API Endpoints
+## API Reference
 
 ### `GET /health`
-Returns API and database status.
 
 ```json
 {"status": "ok", "database": "healthy"}
 ```
 
 ### `GET /documents`
-Lists all indexed PDFs and their chunk counts.
 
 ```json
-[
-  {"source": "document.pdf", "chunk_count": 312}
-]
+[{"source": "document.pdf", "chunk_count": 312}]
 ```
 
 ### `POST /chat`
-Sends a question and returns an answer grounded in the indexed documents. Maintains conversation history per `session_id`.
 
 ```bash
 curl -X POST http://localhost:8000/chat \
@@ -199,17 +233,5 @@ curl -X POST http://localhost:8000/chat \
 }
 ```
 
-Interactive API docs available at `http://localhost:8000/docs`.
-
----
-
-## How It Works
-
-**Ingestion (`ingest.py`)**
-PDFs are extracted with PyMuPDF, split into overlapping semantic chunks, encoded with `BAAI/bge-m3`, and stored in PostgreSQL with a pgvector HNSW index for fast approximate nearest-neighbor search.
-
-**Retrieval**
-At query time, the user's question is optionally rewritten using conversation history, then encoded into a vector. The top-K most similar chunks are retrieved via cosine similarity and reranked with `BAAI/bge-reranker-v2-m3` to select the most relevant passages.
-
-**Generation**
-The reranked context and conversation history are passed to `llama3.2` via Ollama, which generates a grounded answer. Sessions are maintained in memory per `session_id`, enabling multi-turn conversations.
+Interactive docs: `http://localhost:8000/docs`
+ENDOFFILE

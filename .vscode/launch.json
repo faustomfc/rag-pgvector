@@ -1,0 +1,20 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Execute RAG",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/rag.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--db-host", "localhost",
+                "--db-port", "5432",
+                "--db-name", "rag_db",
+                "--db-user", "postgres",
+                "--db-password", "postgres",
+            ]
+        }
+    ]
+}

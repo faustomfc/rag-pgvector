@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Execute Ingest RAG",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/ingest.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                "--db-host", "localhost",
+                "--db-port", "5432",
+                "--db-name", "rag_db",
+                "--db-user", "postgres",
+                "--db-password", "postgres",
+                "--pdf-folder-location", "pdf_folder"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,49 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ingest
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: ingest
+          image: docker-ingest:latest
+          imagePullPolicy: Never
+          args:
+            - "--pdf-folder-location"
+            - "/data/pdfs"
+          env:
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: rag-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rag-secrets
+                  key: DB_PASSWORD
+          volumeMounts:
+            - name: pdf-storage
+              mountPath: /data/pdfs
+      volumes:
+        - name: pdf-storage
+          hostPath:
+            path: /data/pdfs
+            type: Directory

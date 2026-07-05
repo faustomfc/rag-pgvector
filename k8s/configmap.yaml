@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-config
+data:
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  OLLAMA_HOST: http://ollama:11434
+  LLM_MODEL: llama3.2
